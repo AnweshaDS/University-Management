@@ -1,0 +1,38 @@
+### 1. Admin creates a teacher (expect 201)
+POST http://localhost:8081/api/teachers
+Authorization: Basic admin admin123
+Content-Type: application/json
+
+{"username":"t1","password":"pass123","fullName":"Dr. Ada","email":"ada@uni.edu","department":"CS"}
+
+### 2. Admin creates a student (expect 201)
+POST http://localhost:8081/api/students
+Authorization: Basic admin admin123
+Content-Type: application/json
+
+{"username":"s1","password":"pass123","fullName":"Sam","email":"sam@uni.edu","program":"Software Eng"}
+
+### 3. List teachers (expect 200)
+GET http://localhost:8081/api/teachers
+Authorization: Basic admin admin123
+
+### 4. Teacher edits own record (expect 200)
+PUT http://localhost:8081/api/teachers/1
+Authorization: Basic t1 pass123
+Content-Type: application/json
+
+{"fullName":"Dr. Ada L.","email":"ada@uni.edu","department":"CS"}
+
+### 5. Teacher edits a student (expect 403)
+PUT http://localhost:8081/api/students/1
+Authorization: Basic t1 pass123
+Content-Type: application/json
+
+{"fullName":"Hacked","email":"x@uni.edu","program":"X"}
+
+### 6. Student deletes a teacher (expect 403)
+DELETE http://localhost:8081/api/teachers/1
+Authorization: Basic s1 pass123
+
+### 7. No login (expect 401)
+GET http://localhost:8081/api/teachers

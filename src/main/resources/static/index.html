@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>University Management</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #222; }
+  header { background: #1f3a5f; color: #fff; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  main { max-width: 900px; margin: 20px auto; padding: 0 12px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  label { display: block; margin-top: 8px; font-size: 14px; }
+  input { padding: 8px; margin: 4px 0; width: 100%; box-sizing: border-box; }
+  button { padding: 7px 14px; border: 0; border-radius: 4px; background: #1f3a5f; color: #fff; cursor: pointer; }
+  button.danger { background: #b3261e; }
+  button.light { background: #777; }
+  .tabs button { margin-right: 6px; background: #8aa0bf; }
+  .tabs button.active { background: #1f3a5f; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; font-size: 14px; }
+  td button { margin-right: 4px; }
+  .msg { padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+  .err { background: #f9d6d5; color: #7a1410; }
+  .ok { background: #d7f0dc; color: #14532d; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="loginView" class="card" style="max-width:340px;margin:60px auto;">
+  <h2>University Login</h2>
+  <div id="loginMsg" class="msg err hidden"></div>
+  <input id="u" placeholder="Username" autocomplete="off">
+  <input id="p" type="password" placeholder="Password">
+  <button id="loginBtn">Login</button>
+</div>
+
+<div id="appView" class="hidden">
+  <header>
+    <div><strong>University Management</strong></div>
+    <div><span id="who"></span> <button id="logoutBtn" class="light">Logout</button></div>
+  </header>
+  <main>
+    <div id="msg" class="msg hidden"></div>
+    <div class="card">
+      <div class="tabs">
+        <button id="tabTeachers">Teachers</button>
+        <button id="tabStudents">Students</button>
+      </div>
+      <div style="margin:12px 0"><button id="addBtn" class="hidden">+ Add</button></div>
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div id="formCard" class="card hidden">
+      <h3 id="formTitle"></h3>
+      <div id="fields"></div>
+      <div style="margin-top:12px">
+        <button id="saveBtn">Save</button>
+        <button id="cancelBtn" class="light">Cancel</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const CFG = {
+  teachers: { path: '/api/teachers', role: 'TEACHER', extra: 'department', extraLabel: 'Department', title: 'Teacher' },
+  students: { path: '/api/students', role: 'STUDENT', extra: 'program', extraLabel: 'Program', title: 'Student' }
+};
+let auth = null;      // "Basic ..." header value, kept in memory only
+let me = null;        // { username, role }
+let current = 'teachers';
+let editing = null;   // row being edited, or null when adding
+
+const $ = id => document.getElementById(id);
+const show = (el, on) => el.classList.toggle('hidden', !on);
+
+function notify(text, ok) {
+  const m = $('msg');
+  m.textContent = text;
+  m.className = 'msg ' + (ok ? 'ok' : 'err');
+}
+
+function b64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin);
+}
+
+async function api(path, method, body) {
+  const res = await fetch(path, {
+    method: method || 'GET',
+    headers: {
+      'Authorization': auth,
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest' // stops the browser login popup on 401
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (res.status === 401) throw new Error('Wrong username or password (401)');
+  if (res.status === 403) throw new Error('Forbidden (403): you are not allowed to do this');
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const j = await res.json();
+      detail = j.error || Object.values(j).join(', ');
+    } catch (e) { /* no body */ }
+    throw new Error('Error ' + res.status + (detail ? ': ' + detail : ''));
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+async function login() {
+  const u = $('u').value.trim();
+  const p = $('p').value;
+  auth = 'Basic ' + b64(u + ':' + p);
+  try {
+    me = await api('/api/me');
+  } catch (e) {
+    auth = null;
+    $('loginMsg').textContent = e.message;
+    show($('loginMsg'), true);
+    return;
+  }
+  show($('loginMsg'), false);
+  show($('loginView'), false);
+  show($('appView'), true);
+  $('who').textContent = me.username + ' (' + me.role + ')  ';
+  switchTab('teachers');
+}
+
+function logout() {
+  auth = null;
+  me = null;
+  $('u').value = '';
+  $('p').value = '';
+  show($('appView'), false);
+  show($('loginView'), true);
+}
+
+function switchTab(name) {
+  current = name;
+  editing = null;
+  show($('formCard'), false);
+  show($('msg'), false);
+  $('tabTeachers').classList.toggle('active', name === 'teachers');
+  $('tabStudents').classList.toggle('active', name === 'students');
+  show($('addBtn'), me.role === 'ADMIN');
+  $('addBtn').textContent = '+ Add ' + CFG[name].title;
+  load();
+}
+
+function canEdit(row) {
+  return me.role === 'ADMIN' || (me.role === CFG[current].role && row.username === me.username);
+}
+
+async function load() {
+  const cfg = CFG[current];
+  try {
+    const rows = await api(cfg.path);
+    renderTable(rows);
+  } catch (e) {
+    notify(e.message, false);
+  }
+}
+
+function cell(tr, text) {
+  const td = document.createElement('td');
+  td.textContent = text;
+  tr.appendChild(td);
+  return td;
+}
+
+function renderTable(rows) {
+  const cfg = CFG[current];
+  $('thead').innerHTML = '';
+  const hr = document.createElement('tr');
+  ['Id', 'Username', 'Full name', 'Email', cfg.extraLabel, 'Actions'].forEach(h => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hr.appendChild(th);
+  });
+  $('thead').appendChild(hr);
+
+  $('tbody').innerHTML = '';
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    cell(tr, row.id);
+    cell(tr, row.username);
+    cell(tr, row.fullName);
+    cell(tr, row.email);
+    cell(tr, row[cfg.extra]);
+    const actions = cell(tr, '');
+    if (canEdit(row)) {
+      const b = document.createElement('button');
+      b.textContent = 'Edit';
+      b.onclick = () => openForm(row);
+      actions.appendChild(b);
+    }
+    if (me.role === 'ADMIN') {
+      const d = document.createElement('button');
+      d.textContent = 'Delete';
+      d.className = 'danger';
+      d.onclick = () => remove(row);
+      actions.appendChild(d);
+    }
+    $('tbody').appendChild(tr);
+  });
+}
+
+function openForm(row) {
+  editing = row;
+  const cfg = CFG[current];
+  $('formTitle').textContent = (row ? 'Edit ' : 'Add ') + cfg.title;
+  const fields = [
+    ['username', 'Username', 'text'],
+    ['password', row ? 'New password (leave blank to keep)' : 'Password', 'password'],
+    ['fullName', 'Full name', 'text'],
+    ['email', 'Email', 'text'],
+    [cfg.extra, cfg.extraLabel, 'text']
+  ];
+  $('fields').innerHTML = '';
+  fields.forEach(([key, label, type]) => {
+    const l = document.createElement('label');
+    l.textContent = label;
+    const i = document.createElement('input');
+    i.id = 'f_' + key;
+    i.type = type;
+    i.autocomplete = 'off';
+    if (row && key !== 'password') i.value = row[key] || '';
+    if (row && key === 'username') i.disabled = true;
+    l.appendChild(i);
+    $('fields').appendChild(l);
+  });
+  show($('formCard'), true);
+}
+
+async function save() {
+  const cfg = CFG[current];
+  const body = {
+    username: $('f_username').value.trim(),
+    password: $('f_password').value,
+    fullName: $('f_fullName').value.trim(),
+    email: $('f_email').value.trim()
+  };
+  body[cfg.extra] = $('f_' + cfg.extra).value.trim();
+  try {
+    if (editing) {
+      await api(cfg.path + '/' + editing.id, 'PUT', body);
+      notify(cfg.title + ' updated', true);
+    } else {
+      await api(cfg.path, 'POST', body);
+      notify(cfg.title + ' created', true);
+    }
+    show($('formCard'), false);
+    editing = null;
+    load();
+  } catch (e) {
+    notify(e.message, false);
+  }
+}
+
+async function remove(row) {
+  if (!confirm('Delete ' + row.fullName + '?')) return;
+  try {
+    await api(CFG[current].path + '/' + row.id, 'DELETE');
+    notify('Deleted', true);
+    load();
+  } catch (e) {
+    notify(e.message, false);
+  }
+}
+
+$('loginBtn').onclick = login;
+$('p').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+$('logoutBtn').onclick = logout;
+$('tabTeachers').onclick = () => switchTab('teachers');
+$('tabStudents').onclick = () => switchTab('students');
+$('addBtn').onclick = () => openForm(null);
+$('saveBtn').onclick = save;
+$('cancelBtn').onclick = () => { editing = null; show($('formCard'), false); };
+</script>
+</body>
+</html>
