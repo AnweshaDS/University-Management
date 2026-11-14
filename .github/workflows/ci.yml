@@ -5,10 +5,63 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
-    name: Build and test
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: "Unit 1 - Teacher create hashes password"
+            test: TeacherServiceCreateHashesPasswordTest
+          - name: "Unit 2 - Teacher duplicate username rejected"
+            test: TeacherServiceDuplicateUsernameRejectedTest
+          - name: "Unit 3 - Missing teacher gives not found"
+            test: TeacherServiceMissingTeacherNotFoundTest
+          - name: "Unit 4 - Teacher update keeps old password"
+            test: TeacherServiceUpdateKeepsOldPasswordTest
+          - name: "Unit 5 - Student missing username rejected"
+            test: StudentServiceMissingUsernameRejectedTest
+          - name: "Unit 6 - Ownership only owner can edit"
+            test: OwnershipOnlyOwnerCanEditTest
+          - name: "Integration 1 - Admin creates teacher, password hashed"
+            test: AdminCreatesTeacherHashedPasswordIntegrationTest
+          - name: "Integration 2 - Teacher edits own record only"
+            test: TeacherEditsOwnRecordOnlyIntegrationTest
+          - name: "Integration 3 - 401 without login, 403 for student"
+            test: UnauthenticatedAndStudentForbiddenIntegrationTest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x mvnw
+
+      - name: Run ${{ matrix.test }}
+        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=${{ matrix.test }}
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.test }}
+          path: target/surefire-reports
+
+  package:
+    name: Package application
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -25,64 +78,12 @@ jobs:
       - name: Make Maven wrapper executable
         run: chmod +x mvnw
 
-      - name: Compile main and test code
-        run: ./mvnw -B test-compile
-
-      # ---------- Unit tests (one step each) ----------
-
-      - name: "Unit 1 - Teacher create hashes password"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=TeacherServiceCreateHashesPasswordTest
-
-      - name: "Unit 2 - Teacher duplicate username rejected"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=TeacherServiceDuplicateUsernameRejectedTest
-
-      - name: "Unit 3 - Missing teacher gives not found"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=TeacherServiceMissingTeacherNotFoundTest
-
-      - name: "Unit 4 - Teacher update keeps old password"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=TeacherServiceUpdateKeepsOldPasswordTest
-
-      - name: "Unit 5 - Student missing username rejected"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=StudentServiceMissingUsernameRejectedTest
-
-      - name: "Unit 6 - Ownership only owner can edit"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=OwnershipOnlyOwnerCanEditTest
-
-      # ---------- Integration tests (one step each) ----------
-
-      - name: "Integration 1 - Admin creates teacher, password hashed"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=AdminCreatesTeacherHashedPasswordIntegrationTest
-
-      - name: "Integration 2 - Teacher edits own record only"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=TeacherEditsOwnRecordOnlyIntegrationTest
-
-      - name: "Integration 3 - 401 without login, 403 for student"
-        if: ${{ !cancelled() }}
-        run: ./mvnw -B test -DtrimStackTrace=false -Dtest=UnauthenticatedAndStudentForbiddenIntegrationTest
-
-      # ---------- Package ----------
-
-      - name: Package application
+      - name: Package jar
         run: ./mvnw -B package -DskipTests
-
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: surefire-reports
-          path: target/surefire-reports
 
   docker-build:
     name: Build Docker image
-    needs: test
+    needs: package
     runs-on: ubuntu-latest
 
     steps:
